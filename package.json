@@ -1,0 +1,113 @@
+{
+  "name": "sftp-auto-upload",
+  "displayName": "sftp-auto-upload",
+  "publisher": "SartajPHP",
+  "private": false,
+  "preview": false,
+  "author": "SartajPHP",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sartaj-sphp/sftp-auto-upload.git"
+  },
+  "description": "Uploads files to FTP Server when Saved and other FTP actions",
+  "version": "1.0.1",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "keywords": [
+    "vscode",
+    "sftp",
+    "ftp",
+    "upload",
+    "download",
+    "file transfer",
+    "auto upload",
+    "auto download"
+  ],
+  "icon": "images/logo.png",
+  "galleryBanner": {
+    "color": "#007acc",
+    "theme": "dark"
+  }, 
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:.vscode/sftp.json"
+    ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "autoUploadOnSave.uploadFile",
+        "title": "Upload File to Server",
+        "category": "Auto Upload"
+      },
+      {
+        "command": "autoUploadOnSave.downloadFile",
+        "title": "Download File from Server",
+        "category": "Auto Upload"
+      },
+      {
+        "command": "autoUploadOnSave.uploadFolder",
+        "title": "Upload Folder to Server",
+        "category": "Auto Upload"
+      },
+      {
+        "command": "autoUploadOnSave.downloadFolder",
+        "title": "Download Folder from Server",
+        "category": "Auto Upload"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "autoUploadOnSave.uploadFile",
+          "group": "autoUpload@1",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "autoUploadOnSave.downloadFile",
+          "group": "autoUpload@1",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "autoUploadOnSave.uploadFolder",
+          "group": "autoUpload@2",
+          "when": "explorerResourceIsFolder"
+        },
+        {
+          "command": "autoUploadOnSave.downloadFolder",
+          "group": "autoUpload@2",
+          "when": "explorerResourceIsFolder"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/ftp": "^0.3.36",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/ssh2-sftp-client": "^9.0.4",
+    "@types/vscode": "^1.100.0",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "ftp": "^0.3.10",
+    "ssh2-sftp-client": "^12.0.0"
+  }
+}
