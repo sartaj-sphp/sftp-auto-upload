@@ -12,12 +12,15 @@ A lightweight VS Code extension that automatically uploads files to your SFTP/FT
 ## Features ✨
 
 - **Auto-upload on save** - Files are uploaded immediately when saved locally
+- **Auto Delete on delete** - File or Folder deleted from server when deleted locally
 - **Manual file operations**:
   - Upload single file (right-click → "Upload to Server")
   - Download single file (right-click → "Download from Server")
-- **Folder operations** (SFTP only):
+- **Folder operations** :
   - Upload entire folder recursively
   - Download entire folder recursively
+  - Delete entire folder
+  - On Rename file or folder, Old File will be deleted from server also
 - **Multiple protocol support**:
   - SFTP (SSH File Transfer Protocol)
   - FTP (File Transfer Protocol)

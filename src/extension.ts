@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import * as os from 'os';
-import Client from 'ssh2-sftp-client';
-import FtpClient from 'ftp';
+import { SftpClient } from './sftpClient';
+import { FtpClient } from './ftpClient';
+import { TransferNotifier } from './transferNotifier';
 
 interface ServerConfig {
     protocol: 'sftp' | 'ftp';
@@ -14,29 +14,52 @@ interface ServerConfig {
     privateKey?: string;
     remotePath: string;
     uploadOnSave: boolean;
+    ignore: string[];
 }
 
-export function activate(context: vscode.ExtensionContext) {
-    console.log('"FTP Auto Upload on Save" is now active!');
+class StatusBarNotifier implements TransferNotifier {
+    updateTransferStatus(filename: string) {
+        updateTransferStatus(filename);
+    }
+}
 
-    // Auto-upload on save
-	/*
-    const watcher = vscode.workspace.createFileSystemWatcher('** /*', false, false, false);
-    watcher.onDidChange(async (uri) => {
-		vscode.window.showInformationMessage("triggered");
-        const config = await getConfig(uri);
-        if (config?.uploadOnSave) {
-            //await uploadFile(uri.fsPath, config);
+let statusBarItem: vscode.StatusBarItem;
+const statusNotifier = new StatusBarNotifier();
+
+export function activate(context: vscode.ExtensionContext) {
+    console.log('"SFTP/FTP Auto Upload on Save" is now active!');
+    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    showTransferStatus("Ready");
+
+    context.subscriptions.push({
+        dispose: () => {
+            statusBarItem.hide();
+            statusBarItem.dispose();
         }
     });
-*/
+    // Auto-upload on save
+	
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*', false, false, false);
+    watcher.onDidDelete(async (uri) => {
+        const config = await getConfig(uri);
+        if (config?.uploadOnSave) {
+            var isdir = await isDirectory(uri);
+            if(isdir){ 
+            await deleteFolder(uri, config);
+            //vscode.window.showInformationMessage("dir");
+            }else{
+            //vscode.window.showInformationMessage("file");
+            await deleteFile(uri, config);
+            }
+        }
+    });
+
 	vscode.workspace.onDidSaveTextDocument(async (document) => {
     //vscode.window.showInformationMessage("File saved: " + document.uri.fsPath);
 
     const config = await getConfig(document.uri);
     if (config?.uploadOnSave) {
-        await uploadFile(document.uri.fsPath, config);
-		vscode.window.showInformationMessage(`File uploaded: ${path.basename(document.uri.fsPath)}`);
+        await uploadFile(document.uri, config);
     }
 	});
 
@@ -45,37 +68,53 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('autoUploadOnSave.uploadFile', async (uri: vscode.Uri) => {
             const config = await getConfig(uri);
             if (config) {
-                await uploadFile(uri.fsPath, config);
-                vscode.window.showInformationMessage(`File uploaded: ${path.basename(uri.fsPath)}`);
+                await uploadFile(uri, config);
             }
         }),
 
         vscode.commands.registerCommand('autoUploadOnSave.downloadFile', async (uri: vscode.Uri) => {
             const config = await getConfig(uri);
             if (config) {
-                const remotePath = path.join(config.remotePath, path.basename(uri.fsPath));
-                await downloadFile(uri.fsPath, remotePath, config);
-                vscode.window.showInformationMessage(`File downloaded: ${path.basename(uri.fsPath)}`);
+                await downloadFile(uri, config);
             }
         }),
 
         vscode.commands.registerCommand('autoUploadOnSave.uploadFolder', async (uri: vscode.Uri) => {
             const config = await getConfig(uri);
             if (config) {
-                await uploadFolder(uri.fsPath, config);
-                vscode.window.showInformationMessage(`Folder uploaded: ${path.basename(uri.fsPath)}`);
+                await uploadFolder(uri, config);
             }
         }),
 
         vscode.commands.registerCommand('autoUploadOnSave.downloadFolder', async (uri: vscode.Uri) => {
             const config = await getConfig(uri);
             if (config) {
-                const remotePath = path.join(config.remotePath, path.basename(uri.fsPath));
-                await downloadFolder(uri.fsPath, remotePath, config);
-                vscode.window.showInformationMessage(`Folder downloaded: ${path.basename(uri.fsPath)}`);
+                await downloadFolder(uri, config);
             }
         })
     );
+}
+
+function showTransferStatus(filename: string) {
+    statusBarItem.text = `SFTP: ${filename}`;
+    statusBarItem.tooltip = "SFTP/FTP Transfer in progress";
+    statusBarItem.show();
+}
+
+function updateTransferStatus(filename: string) {
+    statusBarItem.text = `SFTP: ${filename}`;
+}
+
+
+async function isDirectory(uri: vscode.Uri): Promise<boolean> {
+        return !path.extname(uri.fsPath); // No extension = likely folder
+}
+
+function getRemotePath(uri: vscode.Uri, config: any): string {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+    if (!workspaceFolder) {throw new Error("File not in workspace");}
+    const relativePath = path.relative(workspaceFolder.uri.fsPath, uri.fsPath);
+    return path.posix.join(config.remotePath, relativePath);
 }
 
 async function getConfig(uri: vscode.Uri): Promise<ServerConfig | undefined> {
@@ -99,267 +138,128 @@ async function getConfig(uri: vscode.Uri): Promise<ServerConfig | undefined> {
     }
 }
 
-async function uploadFile(localPath: string, config: ServerConfig) {
-    const remotePath = path.join(config.remotePath, path.basename(localPath));
-    await transferFile(localPath, remotePath, config, 'upload');
-}
-
-async function downloadFile(localPath: string, remotePath: string, config: ServerConfig) {
-    await transferFile(localPath, remotePath, config, 'download');
-}
-
-async function transferFile(localPath: string, remotePath: string, config: ServerConfig, operation: 'upload' | 'download') {
-    try {
-        if (config.protocol === 'sftp') {
-            const sftp = new Client();
-            await sftp.connect({
-                host: config.host,
-                port: config.port || 22,
-                username: config.username,
-                password: config.password,
-                privateKey: config.privateKey
-            });
-
-            if (operation === 'upload') {
-                await sftp.put(localPath, remotePath);
-            } else {
-                await sftp.get(remotePath, localPath);
-            }
-            await sftp.end();
-        } else {
-            const ftp = new FtpClient();
-            await new Promise<void>((resolve, reject) => {
-                ftp.on('ready', () => {
-                    if (operation === 'upload') {
-                        ftp.put(localPath, remotePath, (err) => {
-                            if (err) {reject(err);}
-                            else {resolve();}
-                            ftp.end();
-                        });
-                    } else {
-                        ftp.get(remotePath, (err, stream) => {
-                            if (err) {return reject(err);}
-                            stream.pipe(fs.createWriteStream(localPath))
-                                .on('close', () => {
-                                    resolve();
-                                    ftp.end();
-                                })
-                                .on('error', reject);
-                        });
-                    }
-                });
-                ftp.connect({
-                    host: config.host,
-                    port: config.port || 21,
-                    user: config.username,
-                    password: config.password
-                });
-            });
-        }
-    } catch (error) {
-        vscode.window.showErrorMessage(`${operation === 'upload' ? 'Upload' : 'Download'} failed: ${error}`);
+async function uploadFile(uri: vscode.Uri, config: ServerConfig) {
+    var client : any;
+    var remotePath : string = "";
+ try {
+        remotePath = getRemotePath(uri, config).replaceAll('\\', '/');
+         if (config.protocol === 'sftp') {
+            client = new SftpClient(config,statusNotifier);
+         } else {
+            client = new FtpClient(config,statusNotifier);
+         }
+        await client.connect();
+        await client.uploadFile(uri.fsPath, remotePath);
+        await client.disconnect();
+        vscode.window.showInformationMessage(`File uploaded: ${remotePath}`);
+     } catch (error) {
+        await client.disconnect();
+        vscode.window.showErrorMessage(`Upload failed ${remotePath}: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-async function uploadFolder(localPath: string, config: ServerConfig) {
-    try {
-        if (config.protocol === 'sftp') {
-            const sftp = new Client();
-            await sftp.connect({
-                host: config.host,
-                port: config.port || 22,
-                username: config.username,
-                password: config.password,
-                privateKey: config.privateKey
-            });
-
-            await uploadDirectory(sftp, localPath, config.remotePath);
-            await sftp.end();
-        } else {
-			await uploadFolderFtp(localPath, config);
-            //vscode.window.showWarningMessage('Folder upload is currently only supported for SFTP');
-        }
-    } catch (error) {
-        vscode.window.showErrorMessage(`Folder upload failed: ${error}`);
+async function deleteFile(uri: vscode.Uri, config: ServerConfig) {
+    var client : any;
+ try {
+        const remotePath = getRemotePath(uri, config);
+         if (config.protocol === 'sftp') {
+            client = new SftpClient(config,statusNotifier);
+         } else {
+            client = new FtpClient(config,statusNotifier);
+         }
+        await client.connect();
+        await client.deleteFile(remotePath);
+        await client.disconnect();
+        vscode.window.showInformationMessage(`File Deleted: ${remotePath}`);
+     } catch (error) {
+        await client.disconnect();
+        vscode.window.showErrorMessage(`File deletion failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-async function downloadFolder(localPath: string, remotePath: string, config: ServerConfig) {
-    try {
-        if (config.protocol === 'sftp') {
-            const sftp = new Client();
-            await sftp.connect({
-                host: config.host,
-                port: config.port || 22,
-                username: config.username,
-                password: config.password,
-                privateKey: config.privateKey
-            });
-
-            await downloadDirectory(sftp, remotePath, localPath);
-            await sftp.end();
-        } else {
-			await downloadFolderFtp(remotePath, localPath, config);
-            //vscode.window.showWarningMessage('Folder download is currently only supported for SFTP');
-        }
-    } catch (error) {
-        vscode.window.showErrorMessage(`Folder download failed: ${error}`);
+async function deleteFolder(uri: vscode.Uri, config: ServerConfig) {
+    var client : any;
+ try {
+        const remotePath = getRemotePath(uri, config);
+         if (config.protocol === 'sftp') {
+            client = new SftpClient(config,statusNotifier);
+         } else {
+            client = new FtpClient(config,statusNotifier);
+         }
+        await client.connect();
+        await client.deleteFolder(remotePath);
+        await client.disconnect();
+        vscode.window.showInformationMessage(`Folder Deleted: ${remotePath}`);
+     } catch (error) {
+        await client.disconnect();
+        vscode.window.showErrorMessage(`Folder deletion failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-async function uploadDirectory(sftp: Client, localDir: string, remoteDir: string) {
-    const files = fs.readdirSync(localDir);
-    
-    for (const file of files) {
-        const localPath = path.join(localDir, file);
-        const remotePath = path.join(remoteDir, file);
-        const stat = fs.statSync(localPath);
+async function downloadFile(uri: vscode.Uri, config: ServerConfig) {
+    var client : any;
+ try {
+        const remotePath = getRemotePath(uri, config);
+         if (config.protocol === 'sftp') {
+            client = new SftpClient(config,statusNotifier);
+         } else {
+            client = new FtpClient(config,statusNotifier);
+         }
+        await client.connect();
+        await client.downloadFile(remotePath,uri.fsPath);
+        await client.disconnect();
+        vscode.window.showInformationMessage(`File downloaded: ${remotePath}`);
+     } catch (error) {
+        await client.disconnect();
+        vscode.window.showErrorMessage(`Download failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
-        if (stat.isDirectory()) {
-            await sftp.mkdir(remotePath, true);
-            await uploadDirectory(sftp, localPath, remotePath);
-        } else {
-            await sftp.put(localPath, remotePath);
-        }
+}
+
+
+async function uploadFolder(uri: vscode.Uri, config: ServerConfig) {
+    var client : any;
+ try {
+        const remotePath = getRemotePath(uri, config);
+         if (config.protocol === 'sftp') {
+            client = new SftpClient(config,statusNotifier);
+         } else {
+            client = new FtpClient(config,statusNotifier);
+         }
+        await client.connect();
+        await client.uploadFolder(uri.fsPath,remotePath);
+        await client.disconnect();
+        vscode.window.showInformationMessage(`Folder uploaded: ${remotePath}`);
+     } catch (error) {
+        await client.disconnect();
+        vscode.window.showErrorMessage(`Upload Folder failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-async function downloadDirectory(sftp: Client, remoteDir: string, localDir: string) {
-    if (!fs.existsSync(localDir)) {
-        fs.mkdirSync(localDir, { recursive: true });
-    }
-
-    const list = await sftp.list(remoteDir);
-    
-    for (const item of list) {
-        const remotePath = path.join(remoteDir, item.name);
-        const localPath = path.join(localDir, item.name);
-
-        if (item.type === 'd') {
-            await downloadDirectory(sftp, remotePath, localPath);
-        } else {
-            await sftp.get(remotePath, localPath);
-        }
-    }
-}
-
-async function uploadFolderFtp(localPath: string, config: ServerConfig) {
-    const ftp = new FtpClient();
-    const remoteBase = path.join(config.remotePath, path.basename(localPath));
-
-    await new Promise<void>((resolve, reject) => {
-        ftp.on('ready', async () => {
-            try {
-                await createFtpDirectory(ftp, remoteBase);
-                await uploadFolderContentsFtp(ftp, localPath, remoteBase);
-                resolve();
-            } catch (error) {
-                reject(error);
-            } finally {
-                ftp.end();
-            }
-        });
-        
-        ftp.connect({
-            host: config.host,
-            port: config.port || 21,
-            user: config.username,
-            password: config.password
-        });
-    });
-}
-
-async function downloadFolderFtp(remotePath: string, localPath: string, config: ServerConfig) {
-    const ftp = new FtpClient();
-    
-    await new Promise<void>((resolve, reject) => {
-        ftp.on('ready', async () => {
-            try {
-                if (!fs.existsSync(localPath)) {
-                    fs.mkdirSync(localPath, { recursive: true });
-                }
-                
-                await downloadFolderContentsFtp(ftp, remotePath, localPath);
-                resolve();
-            } catch (error) {
-                reject(error);
-            } finally {
-                ftp.end();
-            }
-        });
-        
-        ftp.connect({
-            host: config.host,
-            port: config.port || 21,
-            user: config.username,
-            password: config.password
-        });
-    });
-}
-
-// Helper functions
-async function createFtpDirectory(ftp: FtpClient, dirPath: string) {
-    return new Promise<void>((resolve, reject) => {
-        ftp.mkdir(dirPath, true, (err) => {
-            if (err) {reject(err);}
-            else {resolve();}
-        });
-    });
-}
-
-async function uploadFolderContentsFtp(ftp: FtpClient, localDir: string, remoteDir: string) {
-    const entries = fs.readdirSync(localDir, { withFileTypes: true });
-    
-    for (const entry of entries) {
-        const localPath = path.join(localDir, entry.name);
-        const remotePath = path.join(remoteDir, entry.name);
-        
-        if (entry.isDirectory()) {
-            await createFtpDirectory(ftp, remotePath);
-            await uploadFolderContentsFtp(ftp, localPath, remotePath);
-        } else {
-            await new Promise<void>((resolve, reject) => {
-                ftp.put(localPath, remotePath, (err) => {
-                    if (err) {reject(err);}
-                    else {resolve();}
-                });
-            });
-        }
+async function downloadFolder(uri: vscode.Uri, config: ServerConfig) {
+    var client : any;
+ try {
+        const remotePath = getRemotePath(uri, config);
+         if (config.protocol === 'sftp') {
+            client = new SftpClient(config,statusNotifier);
+         } else {
+            client = new FtpClient(config,statusNotifier);
+         }
+        await client.connect();
+        await client.downloadFolder(remotePath,uri.fsPath);
+        await client.disconnect();
+        vscode.window.showInformationMessage(`Folder downloaded: ${remotePath}`);
+     } catch (error) {
+        await client.disconnect();
+        vscode.window.showErrorMessage(`Folder Download failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-async function downloadFolderContentsFtp(ftp: FtpClient, remoteDir: string, localDir: string) {
-    return new Promise<void>((resolve, reject) => {
-        ftp.list(remoteDir, async (err, list) => {
-            if (err) {return reject(err);}
-            
-            try {
-                for (const item of list) {
-                    const remotePath = path.join(remoteDir, item.name);
-                    const localPath = path.join(localDir, item.name);
-                    
-                    if (item.type === 'd') {
-                        if (!fs.existsSync(localPath)) {
-                            fs.mkdirSync(localPath);
-                        }
-                        await downloadFolderContentsFtp(ftp, remotePath, localPath);
-                    } else {
-                        await new Promise<void>((resolveFile, rejectFile) => {
-                            ftp.get(remotePath, (err, stream) => {
-                                if (err) {return rejectFile(err);}
-                                stream.pipe(fs.createWriteStream(localPath))
-                                    .on('close', resolveFile)
-                                    .on('error', rejectFile);
-                            });
-                        });
-                    }
-                }
-                resolve();
-            } catch (error) {
-                reject(error);
-            }
-        });
-    });
-}
 
-export function deactivate() {}
+export function deactivate() {
+    // No need to explicitly hide here because of the subscription disposal
+    // But you can add it if you want to be extra safe
+    if (statusBarItem) {
+        statusBarItem.hide();
+    }
+}
