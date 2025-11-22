@@ -114,7 +114,9 @@ function getRemotePath(uri: vscode.Uri, config: any): string {
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
     if (!workspaceFolder) {throw new Error("File not in workspace");}
     const relativePath = path.relative(workspaceFolder.uri.fsPath, uri.fsPath);
-    return path.posix.join(config.remotePath, relativePath);
+    var p1 = path.posix.join(config.remotePath, relativePath);
+    p1 = p1.replaceAll('\\', '/');
+    return p1;
 }
 
 async function getConfig(uri: vscode.Uri): Promise<ServerConfig | undefined> {
@@ -142,7 +144,7 @@ async function uploadFile(uri: vscode.Uri, config: ServerConfig) {
     var client : any;
     var remotePath : string = "";
  try {
-        remotePath = getRemotePath(uri, config).replaceAll('\\', '/');
+        remotePath = getRemotePath(uri, config);
          if (config.protocol === 'sftp') {
             client = new SftpClient(config,statusNotifier);
          } else {
