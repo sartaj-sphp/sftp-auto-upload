@@ -66,8 +66,9 @@ export class SftpClient {
         const entries = await fs.promises.readdir(localDir, { withFileTypes: true });
         
         for (const entry of entries) {
+            if(entry.name === '.' || entry.name === '..') continue;
             const localPath = path.join(localDir, entry.name);
-            const remotePath = path.join(remoteDir, entry.name);
+            const remotePath = getRemotePath(path.join(remoteDir, entry.name));
             
             if (entry.isDirectory()) {
                 await this.ensureRemoteDirectory(remotePath);
@@ -82,7 +83,8 @@ export class SftpClient {
         const list = await this.client.list(remoteDir);
         
         for (const item of list) {
-            const remotePath = path.join(remoteDir, item.name);
+            if(item.name === '.' || item.name === '..') continue;
+            const remotePath = getRemotePath(path.join(remoteDir, item.name));
             const localPath = path.join(localDir, item.name);
             
             if (item.type === 'd') {
@@ -101,3 +103,7 @@ export class SftpClient {
     }
 }
 
+ function getRemotePath(p1: string): string {
+     p1 = p1.replaceAll('\\', '/');
+     return p1;
+ }

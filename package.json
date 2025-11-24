@@ -11,7 +11,7 @@
     "url": "https://github.com/sartaj-sphp/sftp-auto-upload.git"
   },
   "description": "Uploads files to FTP Server when Saved and other FTP actions",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "engines": {
     "vscode": "^1.100.0"
   },

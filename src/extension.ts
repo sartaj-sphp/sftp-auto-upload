@@ -240,7 +240,7 @@ async function uploadFolder(uri: vscode.Uri, config: ServerConfig) {
 
 async function downloadFolder(uri: vscode.Uri, config: ServerConfig) {
     var client : any;
- try {
+    try {
         const remotePath = getRemotePath(uri, config);
          if (config.protocol === 'sftp') {
             client = new SftpClient(config,statusNotifier);

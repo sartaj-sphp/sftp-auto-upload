@@ -108,8 +108,9 @@ export class FtpClient {
         const entries = fs.readdirSync(localPath, { withFileTypes: true });
         
         for (const entry of entries) {
+            if(entry.name === '.' || entry.name === '..') continue;
             const localEntryPath = path.join(localPath, entry.name);
-            const remoteEntryPath = path.join(remotePath, entry.name);
+            const remoteEntryPath = getRemotePath(path.join(remotePath, entry.name));
             
             if (entry.isDirectory()) {
                 await this.uploadFolder(localEntryPath, remoteEntryPath);
@@ -120,20 +121,23 @@ export class FtpClient {
     }
 
     async downloadFolder(remotePath: string, localPath: string): Promise<void> {
+        try{
         await this.ensureConnected();
         await this.ensureLocalDirectory(localPath);
-        
         const list = await this.listDirectory(remotePath);
         
         for (const item of list) {
-            const remoteItemPath = path.join(remotePath, item.name);
-            const localItemPath = path.join(localPath, item.name);
-            
+            if(item.name === '.' || item.name === '..') continue;
+            const remoteItemPath = getRemotePath(path.join(remotePath, item.name));
+            const localItemPath = path.join(localPath, item.name);            
             if (item.type === 'd') {
                 await this.downloadFolder(remoteItemPath, localItemPath);
             } else {
                 await this.downloadFile(remoteItemPath, localItemPath);
             }
+        }
+        }catch(err){
+            vscode.window.showErrorMessage(`Download failed: ${remotePath} ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 
@@ -180,4 +184,11 @@ export class FtpClient {
             });
         });
     }
-}
+
+ }
+
+ function getRemotePath(p1: string): string {
+     p1 = p1.replaceAll('\\', '/');
+     return p1;
+ }
+ 
